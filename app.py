@@ -155,22 +155,22 @@ if ticker_symbol:
             fig2.add_trace(go.Bar(
                 x=df_gex['Strike'], y=df_gex['Call_GEX_M'], 
                 marker_color='#0D47A1', name="Call GEX", 
-                hovertemplate="Call GEX: %{y:.2f}M<extra></extra>"
+                hovertemplate="Call G-Sigma: %{y:.2f}M<extra></extra>"
             ))
             
             # Bar Put (Oren - Junam Ke Bawah)
             fig2.add_trace(go.Bar(
                 x=df_gex['Strike'], y=df_gex['Put_GEX_M'], 
                 marker_color='#FF9800', name="Put GEX", 
-                hovertemplate="Put GEX: %{y:.2f}M<extra></extra>"
+                hovertemplate="Put G-Sigma: %{y:.2f}M<extra></extra>"
             ))
             
             # Garisan Absolute (Hijau - Terapung Di Atas Mengira Kekuatan Mutlak)
             fig2.add_trace(go.Scatter(
                 x=df_gex['Strike'], y=df_gex['Absolute_GEX_M'], 
                 mode='lines+markers', line=dict(color='#2E7D32', width=2.5), 
-                name="Total Absolute", 
-                hovertemplate="Total Abs Wall: %{y:.2f}M<extra></extra>"
+                name="Total Ab", 
+                hovertemplate="Total Abs: %{y:.2f}M<extra></extra>"
             ))
             
             fig2.add_vrect(x0=df_gex['Strike'].min(), x1=flip_point, fillcolor="#FFCDD2", opacity=0.15, line_width=0, layer="below")
