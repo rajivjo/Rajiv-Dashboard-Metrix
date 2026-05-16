@@ -8,7 +8,7 @@ from utils.data_fetcher import get_options_data
 from utils.math_engine import calculate_gamma, calculate_vanna, calculate_charm, find_gamma_flip
 
 # CONFIG HALAMAN DASHBOARD
-st.set_page_config(page_title="Institutional GEX, VEX & CEX Dashboard", layout="wide")
+st.set_page_config(page_title="Institutional Grade", layout="wide")
 st.title("📊 Rajiv Exposure Matrix")
 
 # INPUT SIDEBAR
@@ -154,14 +154,14 @@ if ticker_symbol:
             # Bar Call (Biru - Pacak Ke Atas)
             fig2.add_trace(go.Bar(
                 x=df_gex['Strike'], y=df_gex['Call_GEX_M'], 
-                marker_color='#0D47A1', name="Call GEX", 
+                marker_color='#0D47A1', name="Call G-Sigma", 
                 hovertemplate="Call G-Sigma: %{y:.2f}M<extra></extra>"
             ))
             
             # Bar Put (Oren - Junam Ke Bawah)
             fig2.add_trace(go.Bar(
                 x=df_gex['Strike'], y=df_gex['Put_GEX_M'], 
-                marker_color='#FF9800', name="Put GEX", 
+                marker_color='#FF9800', name="Put G-Sigma", 
                 hovertemplate="Put G-Sigma: %{y:.2f}M<extra></extra>"
             ))
             
