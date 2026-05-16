@@ -131,7 +131,7 @@ if ticker_symbol:
             fig1.add_vrect(x0=flip_point, x1=df_gex['Strike'].max(), fillcolor="#C8E6C9", opacity=0.15, line_width=0, layer="below")
             fig1.add_vline(x=spot_price, line_dash="solid", line_color="#212121", line_width=2, annotation_text="Last Price")
             if gamma_flip_strike:
-                fig1.add_vline(x=gamma_flip_strike, line_dash="dash", line_color="#2E7D32", line_width=2, annotation_text="Gamma Flip")
+                fig1.add_vline(x=gamma_flip_strike, line_dash="dash", line_color="#2E7D32", line_width=2, annotation_text="G-Flip")
             
             fig1.update_layout(
                 template="plotly_white", height=440, margin=dict(t=30, b=60, l=60, r=40),
