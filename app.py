@@ -3,17 +3,30 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import yfinance as yf
-from datetime import datetime
+from datetime import datetime, timedelta
 from utils.data_fetcher import get_options_data
 from utils.math_engine import calculate_gamma, calculate_vanna, calculate_charm, find_gamma_flip
 
 # CONFIG HALAMAN DASHBOARD
-st.set_page_config(page_title="Institutional Grade", layout="wide")
+st.set_page_config(page_title="Institutional GEX, VEX & CEX Dashboard", layout="wide")
 st.title("📊 Rajiv Exposure Matrix")
+
+# FUNGSI UNTUK MENENTUKAN TAG WEEKLY (w) ATAU MONTHLY (m)
+def get_expiry_tag(date_str):
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        # Semak jika hari Jumaat (weekday == 4 dalam Python di mana Isnin=0, Jumaat=4)
+        # Dan semak jika ia jatuh antara 15hb hingga 21hb (Jumaat ketiga setiap bulan)
+        if dt.weekday() == 4 and (15 <= dt.day <= 21):
+            return f"{date_str} (m)"
+        else:
+            return f"{date_str} (w)"
+    except:
+        return date_str
 
 # INPUT SIDEBAR
 st.sidebar.header("Tetapan Parameter")
-ticker_symbol = st.sidebar.text_input("Intrumen:", value="GLD").upper().strip()
+ticker_symbol = st.sidebar.text_input("Simbol Saham / ETF (US):", value="GLD").upper().strip()
 risk_free_rate = st.sidebar.number_input("Risk-Free Rate (r):", value=0.04, step=0.01)
 spot_range_pct = st.sidebar.slider("Julat Strike dari Harga Spot (%):", min_value=5, max_value=30, value=5)
 
@@ -22,41 +35,82 @@ if ticker_symbol:
         try:
             cached_data = get_options_data(ticker_symbol)
             spot_price = cached_data['spot_price']
-            expirations = cached_data['expirations']
+            raw_expirations = cached_data['expirations']
             
             st.sidebar.metric(label=f"Harga Semasa ({ticker_symbol})", value=f"${spot_price:,.2f}")
             
-            if not expirations:
+            if not raw_expirations:
                 st.error("Tiada data opsyen ditemui.")
                 st.stop()
-                
-            selected_expiry = st.sidebar.selectbox("Pilih Tarikh Tamat Opsyen:", expirations)
             
-            today = datetime.now().date()
-            expiry_date = datetime.strptime(selected_expiry, "%Y-%m-%d").date()
-            t = max((expiry_date - today).days, 0.5) / 365.0
+            # 1. BINA PEMETAAN DICTIONARY DENGAN TAG (w) / (m)
+            expiry_mapping = {get_expiry_tag(d): d for d in raw_expirations}
+            display_options = list(expiry_mapping.keys())
             
+            # 2. TUKAR KEPADA MULTISELECT (Lalai pilih pilihan pertama)
+            selected_display_expiries = st.sidebar.multiselect(
+                "Pilih Tarikh Tamat Opsyen (Boleh Pilih Banyak):", 
+                options=display_options,
+                default=[display_options[0]] if display_options else None
+            )
+            
+            if not selected_display_expiries:
+                st.warning("Sila pilih sekurang-kurangnya satu tarikh tamat opsyen.")
+                st.stop()
+            
+            # Terjemah semula paparan ber-tag kepada tarikh asal untuk yfinance
+            selected_expiries = [expiry_mapping[tag] for tag in selected_display_expiries]
+            
+            # 3. PROSES AGREGAT DATA DARIPADA MULTIPLE EXPIRIES
             ticker = yf.Ticker(ticker_symbol)
-            opt_chain = ticker.option_chain(selected_expiry)
+            all_calls_list = []
+            all_puts_list = []
             
-            calls = opt_chain.calls[['strike', 'openInterest', 'volume', 'impliedVolatility']].copy()
-            puts = opt_chain.puts[['strike', 'openInterest', 'volume', 'impliedVolatility']].copy()
+            # Kira purata baki masa (t) bagi pilihan yang dipilih
+            today = datetime.now().date()
+            t_total = 0
             
-            calls = calls.rename(columns={'strike': 'Strike', 'volume': 'Call_Vol'}).dropna()
-            puts = puts.rename(columns={'strike': 'Strike', 'volume': 'Put_Vol'}).dropna()
+            for expiry in selected_expiries:
+                expiry_date = datetime.strptime(expiry, "%Y-%m-%d").date()
+                t_expiry = max((expiry_date - today).days, 0.5) / 365.0
+                t_total += t_expiry
+                
+                opt_chain = ticker.option_chain(expiry)
+                
+                c_df = opt_chain.calls[['strike', 'openInterest', 'volume', 'impliedVolatility']].copy()
+                p_df = opt_chain.puts[['strike', 'openInterest', 'volume', 'impliedVolatility']].copy()
+                
+                all_calls_list.append(c_df)
+                all_puts_list.append(p_df)
             
-            calls = calls[calls['impliedVolatility'] > 0.01]
-            puts = puts[puts['impliedVolatility'] > 0.01]
+            # Purata masa matang (digunakan sebagai anggaran proksi untuk pengiraan Greeks agregat)
+            t = t_total / len(selected_expiries)
+            
+            # Gabung dan jumlahkan (sum) jika ada strike yang bertindih di tarikh berbeza
+            calls_combined = pd.concat(all_calls_list).groupby('strike').agg({
+                'openInterest': 'sum',
+                'volume': 'sum',
+                'impliedVolatility': 'mean' # Ambil purata IV bagi strike tersebut
+            }).reset_index().rename(columns={'strike': 'Strike', 'volume': 'Call_Vol'})
+            
+            puts_combined = pd.concat(all_puts_list).groupby('strike').agg({
+                'openInterest': 'sum',
+                'volume': 'sum',
+                'impliedVolatility': 'mean'
+            }).reset_index().rename(columns={'strike': 'Strike', 'volume': 'Put_Vol'})
+            
+            calls_combined = calls_combined[calls_combined['impliedVolatility'] > 0.01]
+            puts_combined = puts_combined[puts_combined['impliedVolatility'] > 0.01]
             
             lower_bound = spot_price * (1 - (spot_range_pct / 100))
             upper_bound = spot_price * (1 + (spot_range_pct / 100))
             
-            strikes = sorted(list(set(calls['Strike']).union(set(puts['Strike']))))
+            strikes = sorted(list(set(calls_combined['Strike']).union(set(puts_combined['Strike']))))
             df_gex = pd.DataFrame({'Strike': strikes})
             df_gex = df_gex[(df_gex['Strike'] >= lower_bound) & (df_gex['Strike'] <= upper_bound)].copy()
             
-            df_gex = df_gex.merge(calls.rename(columns={'openInterest': 'Call_OI', 'impliedVolatility': 'Call_IV'}), on='Strike', how='left')
-            df_gex = df_gex.merge(puts.rename(columns={'openInterest': 'Put_OI', 'impliedVolatility': 'Put_IV'}), on='Strike', how='left')
+            df_gex = df_gex.merge(calls_combined.rename(columns={'openInterest': 'Call_OI', 'impliedVolatility': 'Call_IV'}), on='Strike', how='left')
+            df_gex = df_gex.merge(puts_combined.rename(columns={'openInterest': 'Put_OI', 'impliedVolatility': 'Put_IV'}), on='Strike', how='left')
             df_gex = df_gex.fillna(0)
             
             df_gex = df_gex[(df_gex['Call_OI'] > 0) | (df_gex['Put_OI'] > 0)].copy()
@@ -104,10 +158,10 @@ if ticker_symbol:
             
             # KPI PANEL ATAS
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Total Net G-Sigma", f"${df_gex['Net_GEX_M'].sum():,.2f}M")
-            col2.metric("Major ABS", f"${gamma_wall_strike:,.2f}")
-            col3.metric("Total Net V-Sigma", f"${df_gex['Net_VEX_M'].sum():,.2f}M/1%Δ")
-            col4.metric("Total Net C-Sigma", f"${df_gex['Net_CEX_M'].sum():,.2f}M/Hari")
+            col1.metric("Total Net GEX", f"${df_gex['Net_GEX_M'].sum():,.2f}M")
+            col2.metric("Major Gamma Wall", f"${gamma_wall_strike:,.2f}")
+            col3.metric("Total Net Vanna", f"${df_gex['Net_VEX_M'].sum():,.2f}M/1%Δ")
+            col4.metric("Total Net Charm (Bleed)", f"${df_gex['Net_CEX_M'].sum():,.2f}M/Hari")
             
             st.markdown("---")
             
@@ -116,7 +170,7 @@ if ticker_symbol:
             # -----------------------------------------------------------------
             # 1. NET GAMMA EXPOSURE (GRAF 1)
             # -----------------------------------------------------------------
-            st.markdown("<h2 style='color: #00838F; font-family: sans-serif; font-size: 26px; font-weight: bold;'>1. Net G-Sigma Profile</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='color: #00838F; font-family: sans-serif; font-size: 26px; font-weight: bold;'>1. Net Gamma Exposure Profile</h2>", unsafe_allow_html=True)
             
             fig1 = go.Figure()
             colors_net = ['#0D47A1' if x >= 0 else '#FF9800' for x in df_gex['Net_GEX_M']]
@@ -131,46 +185,43 @@ if ticker_symbol:
             fig1.add_vrect(x0=flip_point, x1=df_gex['Strike'].max(), fillcolor="#C8E6C9", opacity=0.15, line_width=0, layer="below")
             fig1.add_vline(x=spot_price, line_dash="solid", line_color="#212121", line_width=2, annotation_text="Last Price")
             if gamma_flip_strike:
-                fig1.add_vline(x=gamma_flip_strike, line_dash="dash", line_color="#2E7D32", line_width=2, annotation_text="G-Flip")
+                fig1.add_vline(x=gamma_flip_strike, line_dash="dash", line_color="#2E7D32", line_width=2, annotation_text="Gamma Flip")
             
             fig1.update_layout(
                 template="plotly_white", height=440, margin=dict(t=30, b=60, l=60, r=40),
                 legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"),
                 hovermode="x unified"
             )
-            fig1.update_yaxes(title_text="Net G-Sigma (Millions)")
+            fig1.update_yaxes(title_text="Net GEX (Millions)")
             fig1.update_xaxes(title_text="Strike Price", tickangle=-45, nticks=24, tickformat=".2f")
             st.plotly_chart(fig1, use_container_width=True)
             
             st.markdown("<br>", unsafe_allow_html=True)
             
             # -----------------------------------------------------------------
-            # 2. ABSOLUTE GAMMA EXPOSURE (GRAF 2) - FIXED BAR OVERLAY
+            # 2. ABSOLUTE GAMMA EXPOSURE (GRAF 2) - OVERLAY BAR ATAS/BAWAH
             # -----------------------------------------------------------------
-            st.markdown("<h2 style='color: #2E7D32; font-family: sans-serif; font-size: 26px; font-weight: bold;'>2. Abs G-Sigma</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='color: #2E7D32; font-family: sans-serif; font-size: 26px; font-weight: bold;'>2. Absolute Gamma Exposure Profile</h2>", unsafe_allow_html=True)
             
             fig2 = go.Figure()
             
-            # Bar Call (Biru - Pacak Ke Atas)
             fig2.add_trace(go.Bar(
                 x=df_gex['Strike'], y=df_gex['Call_GEX_M'], 
-                marker_color='#0D47A1', name="Call G-Sigma", 
-                hovertemplate="Call G-Sigma: %{y:.2f}M<extra></extra>"
+                marker_color='#0D47A1', name="Call GEX", 
+                hovertemplate="Call GEX: %{y:.2f}M<extra></extra>"
             ))
             
-            # Bar Put (Oren - Junam Ke Bawah)
             fig2.add_trace(go.Bar(
                 x=df_gex['Strike'], y=df_gex['Put_GEX_M'], 
-                marker_color='#FF9800', name="Put G-Sigma", 
-                hovertemplate="Put G-Sigma: %{y:.2f}M<extra></extra>"
+                marker_color='#FF9800', name="Put GEX", 
+                hovertemplate="Put GEX: %{y:.2f}M<extra></extra>"
             ))
             
-            # Garisan Absolute (Hijau - Terapung Di Atas Mengira Kekuatan Mutlak)
             fig2.add_trace(go.Scatter(
                 x=df_gex['Strike'], y=df_gex['Absolute_GEX_M'], 
                 mode='lines+markers', line=dict(color='#2E7D32', width=2.5), 
-                name="Total Abs", 
-                hovertemplate="Total Abs: %{y:.2f}M<extra></extra>"
+                name="Total Absolute", 
+                hovertemplate="Total Abs Wall: %{y:.2f}M<extra></extra>"
             ))
             
             fig2.add_vrect(x0=df_gex['Strike'].min(), x1=flip_point, fillcolor="#FFCDD2", opacity=0.15, line_width=0, layer="below")
@@ -182,7 +233,7 @@ if ticker_symbol:
                 legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"),
                 hovermode="x unified"
             )
-            fig2.update_yaxes(title_text="G-Sigma (Millions)")
+            fig2.update_yaxes(title_text="Gamma Exposure (Millions)")
             fig2.update_xaxes(title_text="Strike Price", tickangle=-45, nticks=24, tickformat=".2f")
             st.plotly_chart(fig2, use_container_width=True)
             
@@ -191,7 +242,7 @@ if ticker_symbol:
             # -----------------------------------------------------------------
             # 3. NET VANNA EXPOSURE PROFILE (GRAF 3)
             # -----------------------------------------------------------------
-            st.markdown("<h2 style='color: #4A148C; font-family: sans-serif; font-size: 26px; font-weight: bold;'>3. Net V-Sigma</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='color: #4A148C; font-family: sans-serif; font-size: 26px; font-weight: bold;'>3. Net Vanna Exposure Profile (VEX)</h2>", unsafe_allow_html=True)
             
             fig3 = go.Figure()
             colors_vex = ['#4A148C' if x >= 0 else '#D32F2F' for x in df_gex['Net_VEX_M']]
@@ -207,7 +258,7 @@ if ticker_symbol:
                 legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"),
                 hovermode="x unified"
             )
-            fig3.update_yaxes(title_text="Net V-Sigma ($M per 1% IV)")
+            fig3.update_yaxes(title_text="Net Vanna Exposure ($M per 1% IV)")
             fig3.update_xaxes(title_text="Strike Price", tickangle=-45, nticks=24, tickformat=".2f")
             st.plotly_chart(fig3, use_container_width=True)
             
@@ -216,7 +267,7 @@ if ticker_symbol:
             # -----------------------------------------------------------------
             # 4. NET CHARM EXPOSURE PROFILE (GRAF 4)
             # -----------------------------------------------------------------
-            st.markdown("<h2 style='color: #004D40; font-family: sans-serif; font-size: 26px; font-weight: bold;'>4. Net C-Sigma</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='color: #004D40; font-family: sans-serif; font-size: 26px; font-weight: bold;'>4. Net Charm Exposure Profile (CEX / Time Bleed)</h2>", unsafe_allow_html=True)
             
             fig4 = go.Figure()
             colors_cex = ['#00695C' if x >= 0 else '#C62828' for x in df_gex['Net_CEX_M']]
@@ -232,14 +283,14 @@ if ticker_symbol:
                 legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"),
                 hovermode="x unified"
             )
-            fig4.update_yaxes(title_text="Net C-Sigma ($M per Day)")
+            fig4.update_yaxes(title_text="Net Charm Exposure ($M per Day)")
             fig4.update_xaxes(title_text="Strike Price", tickangle=-45, nticks=24, tickformat=".2f")
             st.plotly_chart(fig4, use_container_width=True)
             
             # SEKSYEN DOWNLOAD
             st.markdown("### 📥 Simpan Data Mentah")
             csv_data = df_gex[['Strike', 'Call_OI', 'Put_OI', 'Call_Vol', 'Put_Vol', 'Net_GEX_M', 'Absolute_GEX_M', 'Net_VEX_M', 'Net_CEX_M']].to_csv(index=False)
-            st.download_button(label="Muat Turun Fail CSV", data=csv_data, file_name=f"{ticker_symbol}_gex_vex_cex_data.csv", mime="text/csv")
+            st.download_button(label="Muat Turun Fail CSV", data=csv_data, file_name=f"{ticker_symbol}_aggregated_gex_data.csv", mime="text/csv")
             
         except Exception as e:
             st.error(f"Ralat susunan grafik: {e}")
