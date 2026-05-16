@@ -71,5 +71,29 @@ def find_gamma_flip(df):
                 continue
             flip_strike = strike_current - gex_current * (strike_next - strike_current) / (gex_next - gex_current)
             return flip_strike
+        
+def calculate_charm(S, K, t, r, sigma, option_type="call"):
+    """
+    Mengira nilai Charm / Delta Bleed (dDelta / dt) menggunakan model Black-Scholes.
+    Menunjukkan kadar kebocoran Delta opsyen untuk setiap 1 hari masa yang berlalu (per day bleed).
+    """
+    if t <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        return 0
+        
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * t) / (sigma * np.sqrt(t))
+    d2 = d1 - sigma * np.sqrt(t)
+    
+    nd1 = si.norm.pdf(d1)
+    n_d1 = si.norm.cdf(d1)
+    
+    # Formula Matematik Charm Asal (Per Year)
+    if option_type == "call":
+        charm_year = -nd1 * (r / (sigma * np.sqrt(t)) - d2 / (2 * t)) - r * n_d1
+    else: # put
+        charm_year = -nd1 * (r / (sigma * np.sqrt(t)) - d2 / (2 * t)) + r * (1 - n_d1)
+        
+    # Tukar kepada kadar harian (Per Day Bleed)
+    charm_day = charm_year / 365.0
+    return charm_day
             
     return None
