@@ -169,7 +169,7 @@ if ticker_symbol:
             fig2.add_trace(go.Scatter(
                 x=df_gex['Strike'], y=df_gex['Absolute_GEX_M'], 
                 mode='lines+markers', line=dict(color='#2E7D32', width=2.5), 
-                name="Total Ab", 
+                name="Total Abs", 
                 hovertemplate="Total Abs: %{y:.2f}M<extra></extra>"
             ))
             
