@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import yfinance as yf
-from datetime import datetime, timedelta
+from datetime import datetime
 from utils.data_fetcher import get_options_data
 from utils.math_engine import calculate_gamma, calculate_vanna, calculate_charm, find_gamma_flip
 
@@ -11,12 +11,11 @@ from utils.math_engine import calculate_gamma, calculate_vanna, calculate_charm,
 st.set_page_config(page_title="Institutional GEX, VEX & CEX Dashboard", layout="wide")
 st.title("📊 Rajiv Exposure Matrix")
 
-# FUNGSI UNTUK MENENTUKAN TAG WEEKLY (w) ATAU MONTHLY (m)
+# FUNGSI UNTUK MENENTUKAN TAG WEEKLY (w) ATAU MONTHLY (m) WITHOUT CHANGING ANY MAIN ENGINE NAMES
 def get_expiry_tag(date_str):
     try:
         dt = datetime.strptime(date_str, "%Y-%m-%d")
-        # Semak jika hari Jumaat (weekday == 4 dalam Python di mana Isnin=0, Jumaat=4)
-        # Dan semak jika ia jatuh antara 15hb hingga 21hb (Jumaat ketiga setiap bulan)
+        # Semak jika hari Jumaat (weekday == 4) dan jatuh antara 15hb hingga 21hb (Monthly Expiry)
         if dt.weekday() == 4 and (15 <= dt.day <= 21):
             return f"{date_str} (m)"
         else:
@@ -28,26 +27,26 @@ def get_expiry_tag(date_str):
 st.sidebar.header("Tetapan Parameter")
 ticker_symbol = st.sidebar.text_input("Simbol Saham / ETF (US):", value="GLD").upper().strip()
 risk_free_rate = st.sidebar.number_input("Risk-Free Rate (r):", value=0.04, step=0.01)
-spot_range_pct = st.sidebar.slider("Julat Strike dari Harga Spot (%):", min_value=5, max_value=30, value=5)
+spot_range_pct = st.sidebar.slider("Julat Strike dari Harga Spot (%):", min_value=5, max_value=30, value=7)
 
 if ticker_symbol:
     with st.spinner(f"Memproses data bagi {ticker_symbol}..."):
         try:
             cached_data = get_options_data(ticker_symbol)
             spot_price = cached_data['spot_price']
-            raw_expirations = cached_data['expirations']
+            expirations = cached_data['expirations']
             
             st.sidebar.metric(label=f"Harga Semasa ({ticker_symbol})", value=f"${spot_price:,.2f}")
             
-            if not raw_expirations:
+            if not expirations:
                 st.error("Tiada data opsyen ditemui.")
                 st.stop()
-            
-            # 1. BINA PEMETAAN DICTIONARY DENGAN TAG (w) / (m)
-            expiry_mapping = {get_expiry_tag(d): d for d in raw_expirations}
+                
+            # 🟢 BINA PEMETAAN TAG TANPA MENGUBAH STRUKTUR ASAL EXPIRATIONS
+            expiry_mapping = {get_expiry_tag(d): d for d in expirations}
             display_options = list(expiry_mapping.keys())
             
-            # 2. TUKAR KEPADA MULTISELECT (Lalai pilih pilihan pertama)
+            # 🟢 TUKAR KEPADA MULTISELECT AGREGAT MALAYSIA STYLE
             selected_display_expiries = st.sidebar.multiselect(
                 "Pilih Tarikh Tamat Opsyen (Boleh Pilih Banyak):", 
                 options=display_options,
@@ -57,16 +56,15 @@ if ticker_symbol:
             if not selected_display_expiries:
                 st.warning("Sila pilih sekurang-kurangnya satu tarikh tamat opsyen.")
                 st.stop()
-            
-            # Terjemah semula paparan ber-tag kepada tarikh asal untuk yfinance
+                
+            # Tukar semula string paparan ber-tag kepada tarikh asal untuk kegunaan yfinance
             selected_expiries = [expiry_mapping[tag] for tag in selected_display_expiries]
             
-            # 3. PROSES AGREGAT DATA DARIPADA MULTIPLE EXPIRIES
             ticker = yf.Ticker(ticker_symbol)
             all_calls_list = []
             all_puts_list = []
             
-            # Kira purata baki masa (t) bagi pilihan yang dipilih
+            # Kira purata baki masa (t) berasaskan pilihan expiries yang dipilih tanpa ubah formula asal
             today = datetime.now().date()
             t_total = 0
             
@@ -82,15 +80,14 @@ if ticker_symbol:
                 
                 all_calls_list.append(c_df)
                 all_puts_list.append(p_df)
-            
-            # Purata masa matang (digunakan sebagai anggaran proksi untuk pengiraan Greeks agregat)
+                
             t = t_total / len(selected_expiries)
             
-            # Gabung dan jumlahkan (sum) jika ada strike yang bertindih di tarikh berbeza
+            # Gabungkan data mengikut Strike Price tanpa mengubah nama kolom asal yang diperlukan di bawah
             calls_combined = pd.concat(all_calls_list).groupby('strike').agg({
                 'openInterest': 'sum',
                 'volume': 'sum',
-                'impliedVolatility': 'mean' # Ambil purata IV bagi strike tersebut
+                'impliedVolatility': 'mean'
             }).reset_index().rename(columns={'strike': 'Strike', 'volume': 'Call_Vol'})
             
             puts_combined = pd.concat(all_puts_list).groupby('strike').agg({
@@ -119,7 +116,7 @@ if ticker_symbol:
                 st.warning("Tiada kecairan data opsyen aktif dalam julat harga ini. Sila luaskan julat % di sidebar.")
                 st.stop()
             
-            # PENGIRAAN MODEL MATRIKS (GAMMA, VANNA, CHARM)
+            # KEKAL NAMA ENGINE DAN PEMOLEH UBAH ASAL SEPERTI YANG ANDA RENAME
             df_gex['Call_Gamma'] = df_gex.apply(lambda r: calculate_gamma(spot_price, r['Strike'], t, risk_free_rate, r['Call_IV'] if r['Call_IV'] > 0 else 0.1), axis=1)
             df_gex['Put_Gamma'] = df_gex.apply(lambda r: calculate_gamma(spot_price, r['Strike'], t, risk_free_rate, r['Put_IV'] if r['Put_IV'] > 0 else 0.1), axis=1)
             
@@ -205,18 +202,21 @@ if ticker_symbol:
             
             fig2 = go.Figure()
             
+            # Bar Call (Biru - Atas)
             fig2.add_trace(go.Bar(
                 x=df_gex['Strike'], y=df_gex['Call_GEX_M'], 
                 marker_color='#0D47A1', name="Call GEX", 
                 hovertemplate="Call GEX: %{y:.2f}M<extra></extra>"
             ))
             
+            # Bar Put (Oren - Bawah)
             fig2.add_trace(go.Bar(
                 x=df_gex['Strike'], y=df_gex['Put_GEX_M'], 
                 marker_color='#FF9800', name="Put GEX", 
                 hovertemplate="Put GEX: %{y:.2f}M<extra></extra>"
             ))
             
+            # Garisan Absolute (Hijau - Terapung Di Atas Mengira Kekuatan Mutlak)
             fig2.add_trace(go.Scatter(
                 x=df_gex['Strike'], y=df_gex['Absolute_GEX_M'], 
                 mode='lines+markers', line=dict(color='#2E7D32', width=2.5), 
