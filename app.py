@@ -147,7 +147,7 @@ if ticker_symbol:
             # -----------------------------------------------------------------
             # 2. ABSOLUTE GAMMA EXPOSURE (GRAF 2) - FIXED BAR OVERLAY
             # -----------------------------------------------------------------
-            st.markdown("<h2 style='color: #2E7D32; font-family: sans-serif; font-size: 26px; font-weight: bold;'>2. Absolute Gamma Exposure Profile</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='color: #2E7D32; font-family: sans-serif; font-size: 26px; font-weight: bold;'>2. Abs G-Sigma</h2>", unsafe_allow_html=True)
             
             fig2 = go.Figure()
             
@@ -182,7 +182,7 @@ if ticker_symbol:
                 legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"),
                 hovermode="x unified"
             )
-            fig2.update_yaxes(title_text="Gamma Exposure (Millions)")
+            fig2.update_yaxes(title_text="G-Sigma (Millions)")
             fig2.update_xaxes(title_text="Strike Price", tickangle=-45, nticks=24, tickformat=".2f")
             st.plotly_chart(fig2, use_container_width=True)
             
@@ -191,7 +191,7 @@ if ticker_symbol:
             # -----------------------------------------------------------------
             # 3. NET VANNA EXPOSURE PROFILE (GRAF 3)
             # -----------------------------------------------------------------
-            st.markdown("<h2 style='color: #4A148C; font-family: sans-serif; font-size: 26px; font-weight: bold;'>3. Net Vanna Exposure Profile (VEX)</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='color: #4A148C; font-family: sans-serif; font-size: 26px; font-weight: bold;'>3. Net V-Sigma</h2>", unsafe_allow_html=True)
             
             fig3 = go.Figure()
             colors_vex = ['#4A148C' if x >= 0 else '#D32F2F' for x in df_gex['Net_VEX_M']]
@@ -207,7 +207,7 @@ if ticker_symbol:
                 legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"),
                 hovermode="x unified"
             )
-            fig3.update_yaxes(title_text="Net Vanna Exposure ($M per 1% IV)")
+            fig3.update_yaxes(title_text="Net V-Sigma ($M per 1% IV)")
             fig3.update_xaxes(title_text="Strike Price", tickangle=-45, nticks=24, tickformat=".2f")
             st.plotly_chart(fig3, use_container_width=True)
             
@@ -216,7 +216,7 @@ if ticker_symbol:
             # -----------------------------------------------------------------
             # 4. NET CHARM EXPOSURE PROFILE (GRAF 4)
             # -----------------------------------------------------------------
-            st.markdown("<h2 style='color: #004D40; font-family: sans-serif; font-size: 26px; font-weight: bold;'>4. Net Charm Exposure Profile (CEX / Time Bleed)</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='color: #004D40; font-family: sans-serif; font-size: 26px; font-weight: bold;'>4. Net C-Sigma</h2>", unsafe_allow_html=True)
             
             fig4 = go.Figure()
             colors_cex = ['#00695C' if x >= 0 else '#C62828' for x in df_gex['Net_CEX_M']]
@@ -232,7 +232,7 @@ if ticker_symbol:
                 legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"),
                 hovermode="x unified"
             )
-            fig4.update_yaxes(title_text="Net Charm Exposure ($M per Day)")
+            fig4.update_yaxes(title_text="Net C-Sigma ($M per Day)")
             fig4.update_xaxes(title_text="Strike Price", tickangle=-45, nticks=24, tickformat=".2f")
             st.plotly_chart(fig4, use_container_width=True)
             
