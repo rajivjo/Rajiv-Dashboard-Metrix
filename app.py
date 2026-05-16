@@ -5,17 +5,18 @@ import plotly.graph_objects as go
 import yfinance as yf
 from datetime import datetime
 from utils.data_fetcher import get_options_data
-from utils.math_engine import calculate_gamma, calculate_vanna, find_gamma_flip
+# 🟢 KEMASKINI: Import calculate_charm sekali
+from utils.math_engine import calculate_gamma, calculate_vanna, calculate_charm, find_gamma_flip
 
 # CONFIG HALAMAN DASHBOARD
-st.set_page_config(page_title="Professional GEX & VEX Dashboard", layout="wide")
+st.set_page_config(page_title="Institutional GEX, VEX & CEX Dashboard", layout="wide")
 st.title("📊 Rajiv Exposure Matrix")
 
 # INPUT SIDEBAR
 st.sidebar.header("Tetapan Parameter")
 ticker_symbol = st.sidebar.text_input("Simbol Saham / ETF (US):", value="GLD").upper().strip()
 risk_free_rate = st.sidebar.number_input("Risk-Free Rate (r):", value=0.04, step=0.01)
-spot_range_pct = st.sidebar.slider("Julat Strike dari Harga Spot (%):", min_value=5, max_value=30, value=5)
+spot_range_pct = st.sidebar.slider("Julat Strike dari Harga Spot (%):", min_value=5, max_value=30, value=7)
 
 if ticker_symbol:
     with st.spinner(f"Memproses data bagi {ticker_symbol}..."):
@@ -65,15 +66,17 @@ if ticker_symbol:
                 st.warning("Tiada kecairan data opsyen aktif dalam julat harga ini. Sila luaskan julat % di sidebar.")
                 st.stop()
             
-            # PENGIRAAN MODEL GAMMA (GEX)
+            # PENGIRAAN MODEL MATRIKS (GAMMA, VANNA, CHARM)
             df_gex['Call_Gamma'] = df_gex.apply(lambda r: calculate_gamma(spot_price, r['Strike'], t, risk_free_rate, r['Call_IV'] if r['Call_IV'] > 0 else 0.1), axis=1)
             df_gex['Put_Gamma'] = df_gex.apply(lambda r: calculate_gamma(spot_price, r['Strike'], t, risk_free_rate, r['Put_IV'] if r['Put_IV'] > 0 else 0.1), axis=1)
             
-            # PENGIRAAN MODEL VANNA (VEX)
             df_gex['Call_Vanna'] = df_gex.apply(lambda r: calculate_vanna(spot_price, r['Strike'], t, risk_free_rate, r['Call_IV'] if r['Call_IV'] > 0 else 0.1, "call"), axis=1)
             df_gex['Put_Vanna'] = df_gex.apply(lambda r: calculate_vanna(spot_price, r['Strike'], t, risk_free_rate, r['Put_IV'] if r['Put_IV'] > 0 else 0.1, "put"), axis=1)
             
-            # FORMULA ASAS EXPOSURE RAW
+            df_gex['Call_Charm'] = df_gex.apply(lambda r: calculate_charm(spot_price, r['Strike'], t, risk_free_rate, r['Call_IV'] if r['Call_IV'] > 0 else 0.1, "call"), axis=1)
+            df_gex['Put_Charm'] = df_gex.apply(lambda r: calculate_charm(spot_price, r['Strike'], t, risk_free_rate, r['Put_IV'] if r['Put_IV'] > 0 else 0.1, "put"), axis=1)
+            
+            # RAW EXPOSURE MATRIX
             df_gex['Call_GEX_Raw'] = df_gex['Call_Gamma'] * df_gex['Call_OI'] * (spot_price ** 2) * 0.01
             df_gex['Put_GEX_Raw'] = df_gex['Put_Gamma'] * df_gex['Put_OI'] * (spot_price ** 2) * 0.01 * (-1)
             df_gex['Net_GEX_Raw'] = df_gex['Call_GEX_Raw'] + df_gex['Put_GEX_Raw']
@@ -82,27 +85,35 @@ if ticker_symbol:
             df_gex['Put_VEX_Raw'] = df_gex['Put_Vanna'] * df_gex['Put_OI'] * spot_price * 0.01
             df_gex['Net_VEX_Raw'] = df_gex['Call_VEX_Raw'] + df_gex['Put_VEX_Raw']
             
+            # CHARM EXPOSURE RAW (Per Day Delta Bleed Impact on Futures)
+            df_gex['Call_CEX_Raw'] = df_gex['Call_Charm'] * df_gex['Call_OI'] * spot_price
+            df_gex['Put_CEX_Raw'] = df_gex['Put_Charm'] * df_gex['Put_OI'] * spot_price
+            df_gex['Net_CEX_Raw'] = df_gex['Call_CEX_Raw'] + df_gex['Put_CEX_Raw']
+            
             df_gex = df_gex.sort_values('Strike').reset_index(drop=True)
             
-            # TUKAR KE JUTA (MILLIONS)
+            # TUKAR SKALA KE JUTA (MILLIONS)
             df_gex['Call_GEX_M'] = df_gex['Call_GEX_Raw'] / 1_000_000
             df_gex['Put_GEX_M'] = df_gex['Put_GEX_Raw'] / 1_000_000
             df_gex['Net_GEX_M'] = df_gex['Net_GEX_Raw'] / 1_000_000
             df_gex['Absolute_GEX_M'] = (df_gex['Call_GEX_Raw'].abs() + df_gex['Put_GEX_Raw'].abs()) / 1_000_000
+            
             df_gex['Net_VEX_M'] = df_gex['Net_VEX_Raw'] / 1_000_000
+            df_gex['Net_CEX_M'] = df_gex['Net_CEX_Raw'] / 1_000_000
             
             gamma_flip_strike = find_gamma_flip(df_gex.rename(columns={'Net_GEX_M': 'Net_GEX'}))
             gamma_wall_strike = df_gex.loc[df_gex['Absolute_GEX_M'].idxmax()]['Strike']
             
-            # KPI PANEL ATAS
-            col1, col2, col3 = st.columns(3)
+            # KPI PANEL ATAS DENGAN CHARM/BLEED GLOBAL
+            col1, col2, col3, col4 = st.columns(4)
             col1.metric("Total Net GEX", f"${df_gex['Net_GEX_M'].sum():,.2f}M")
             col2.metric("Major Gamma Wall", f"${gamma_wall_strike:,.2f}")
-            col3.metric("Total Net Vanna (VEX)", f"${df_gex['Net_VEX_M'].sum():,.2f}M / 1% IV Δ")
+            col3.metric("Total Net Vanna", f"${df_gex['Net_VEX_M'].sum():,.2f}M/1%Δ")
+            col4.metric("Total Net Charm (Bleed)", f"${df_gex['Net_CEX_M'].sum():,.2f}M/Hari")
             
             st.markdown("---")
             
-            # KEMASKINI: Bina custom data string berasingan untuk hilangkan masalah syntax bertindan
+            # FORMAT HOVER TEXT
             hover_strings = []
             for _, row in df_gex.iterrows():
                 h_text = f"Call OI: {row['Call_OI']/1000:,.0f}K<br>Put OI: {row['Put_OI']/1000:,.0f}K<br>Call Vol: {row['Call_Vol']/1000:,.0f}K<br>Put Vol: {row['Put_Vol']/1000:,.0f}K"
@@ -126,19 +137,12 @@ if ticker_symbol:
             flip_point = gamma_flip_strike if gamma_flip_strike else spot_price
             fig1.add_vrect(x0=df_gex['Strike'].min(), x1=flip_point, fillcolor="#FFCDD2", opacity=0.15, line_width=0, layer="below")
             fig1.add_vrect(x0=flip_point, x1=df_gex['Strike'].max(), fillcolor="#C8E6C9", opacity=0.15, line_width=0, layer="below")
-            
-            fig1.add_vline(x=spot_price, line_dash="solid", line_color="#212121", line_width=2, 
-                          annotation_text="Last Price", annotation_position="top left")
+            fig1.add_vline(x=spot_price, line_dash="solid", line_color="#212121", line_width=2, annotation_text="Last Price")
             if gamma_flip_strike:
-                fig1.add_vline(x=gamma_flip_strike, line_dash="dash", line_color="#2E7D32", line_width=2, 
-                              annotation_text="Gamma Flip", annotation_position="top right")
+                fig1.add_vline(x=gamma_flip_strike, line_dash="dash", line_color="#2E7D32", line_width=2, annotation_text="Gamma Flip")
             
-            fig1.update_layout(
-                template="plotly_white", height=460, hovermode="x unified",
-                margin=dict(t=30, b=60, l=60, r=40),
-                legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center")
-            )
-            fig1.update_yaxes(title_text="Net GEX (Millions)", title_font=dict(size=12))
+            fig1.update_layout(template="plotly_white", height=440, margin=dict(t=30, b=60, l=60, r=40), legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"))
+            fig1.update_yaxes(title_text="Net GEX (Millions)")
             fig1.update_xaxes(title_text="Strike Price", tickangle=-45, nticks=24, tickformat=".2f")
             st.plotly_chart(fig1, use_container_width=True)
             
@@ -150,35 +154,16 @@ if ticker_symbol:
             st.markdown("<h2 style='color: #2E7D32; font-family: sans-serif; font-size: 26px; font-weight: bold;'>2. Absolute Gamma Exposure Profile</h2>", unsafe_allow_html=True)
             
             fig2 = go.Figure()
-            
-            fig2.add_trace(go.Bar(
-                x=df_gex['Strike'], y=df_gex['Call_GEX_M'], marker_color='#0D47A1', 
-                name="Call Gamma Exposure", customdata=df_gex['Hover_Text'],
-                hovertemplate="Call GEX: %{y:.2f}M<br>%{customdata}<extra></extra>"
-            ))
-            
-            fig2.add_trace(go.Bar(
-                x=df_gex['Strike'], y=df_gex['Put_GEX_M'], marker_color='#FF9800', 
-                name="Put Gamma Exposure", customdata=df_gex['Hover_Text'],
-                hovertemplate="Put GEX: %{y:.2f}M<br>%{customdata}<extra></extra>"
-            ))
-            
-            fig2.add_trace(go.Scatter(
-                x=df_gex['Strike'], y=df_gex['Absolute_GEX_M'], mode='lines+markers',
-                line=dict(color='#2E7D32', width=2.5), name="Absolute Profile",
-                hovertemplate="Total Absolute: %{y:.2f}M<extra></extra>"
-            ))
+            fig2.add_trace(go.Bar(x=df_gex['Strike'], y=df_gex['Call_GEX_M'], marker_color='#0D47A1', name="Call Gamma Exposure", customdata=df_gex['Hover_Text'], hovertemplate="Call GEX: %{y:.2f}M<br>%{customdata}<extra></extra>"))
+            fig2.add_trace(go.Bar(x=df_gex['Strike'], y=df_gex['Put_GEX_M'], marker_color='#FF9800', name="Put Gamma Exposure", customdata=df_gex['Hover_Text'], hovertemplate="Put GEX: %{y:.2f}M<br>%{customdata}<extra></extra>"))
+            fig2.add_trace(go.Scatter(x=df_gex['Strike'], y=df_gex['Absolute_GEX_M'], mode='lines+markers', line=dict(color='#2E7D32', width=2.5), name="Absolute Profile", hovertemplate="Total Absolute: %{y:.2f}M<extra></extra>"))
             
             fig2.add_vrect(x0=df_gex['Strike'].min(), x1=flip_point, fillcolor="#FFCDD2", opacity=0.15, line_width=0, layer="below")
             fig2.add_vrect(x0=flip_point, x1=df_gex['Strike'].max(), fillcolor="#C8E6C9", opacity=0.15, line_width=0, layer="below")
             fig2.add_vline(x=spot_price, line_dash="solid", line_color="#212121", line_width=2, annotation_text="Last Price")
             
-            fig2.update_layout(
-                template="plotly_white", height=460, barmode='relative', hovermode="x unified", 
-                margin=dict(t=30, b=60, l=60, r=40),
-                legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center")
-            )
-            fig2.update_yaxes(title_text="Absolute GEX (Millions)", title_font=dict(size=12))
+            fig2.update_layout(template="plotly_white", height=440, barmode='relative', margin=dict(t=30, b=60, l=60, r=40), legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"))
+            fig2.update_yaxes(title_text="Absolute GEX (Millions)")
             fig2.update_xaxes(title_text="Strike Price", tickangle=-45, nticks=24, tickformat=".2f")
             st.plotly_chart(fig2, use_container_width=True)
             
@@ -193,26 +178,41 @@ if ticker_symbol:
             colors_vex = ['#4A148C' if x >= 0 else '#D32F2F' for x in df_gex['Net_VEX_M']]
             
             fig3.add_trace(go.Bar(
-                x=df_gex['Strike'], y=df_gex['Net_VEX_M'], marker_color=colors_vex,
-                name="Net VEX", customdata=df_gex['Hover_Text'],
+                x=df_gex['Strike'], y=df_gex['Net_VEX_M'], marker_color=colors_vex, name="Net VEX", customdata=df_gex['Hover_Text'],
                 hovertemplate="<b>Strike: $%{x:.2f}</b><br>Net Vanna: %{y:.2f}M per 1% IV Δ<br><br>%{customdata}<extra></extra>"
             ))
-            
             fig3.add_vline(x=spot_price, line_dash="solid", line_color="#212121", line_width=2, annotation_text="Last Price")
             
-            fig3.update_layout(
-                template="plotly_white", height=460, hovermode="x unified",
-                margin=dict(t=30, b=60, l=60, r=40),
-                legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center")
-            )
-            fig3.update_yaxes(title_text="Net Vanna Exposure ($M per 1% IV)", title_font=dict(size=12))
+            fig3.update_layout(template="plotly_white", height=440, margin=dict(t=30, b=60, l=60, r=40), legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"))
+            fig3.update_yaxes(title_text="Net Vanna Exposure ($M per 1% IV)")
             fig3.update_xaxes(title_text="Strike Price", tickangle=-45, nticks=24, tickformat=".2f")
             st.plotly_chart(fig3, use_container_width=True)
             
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # -----------------------------------------------------------------
+            # 4. NET CHARM EXPOSURE PROFILE (GRAF 4) - NEW SPEED-UP METRIX
+            # -----------------------------------------------------------------
+            st.markdown("<h2 style='color: #004D40; font-family: sans-serif; font-size: 26px; font-weight: bold;'>4. Net Charm Exposure Profile (CEX / Time Bleed)</h2>", unsafe_allow_html=True)
+            
+            fig4 = go.Figure()
+            colors_cex = ['#00695C' if x >= 0 else '#C62828' for x in df_gex['Net_CEX_M']]
+            
+            fig4.add_trace(go.Bar(
+                x=df_gex['Strike'], y=df_gex['Net_CEX_M'], marker_color=colors_cex, name="Net Charm", customdata=df_gex['Hover_Text'],
+                hovertemplate="<b>Strike: $%{x:.2f}</b><br>Charm Bleed: %{y:.2f}M per Day decay<br><br>%{customdata}<extra></extra>"
+            ))
+            fig4.add_vline(x=spot_price, line_dash="solid", line_color="#212121", line_width=2, annotation_text="Last Price")
+            
+            fig4.update_layout(template="plotly_white", height=440, margin=dict(t=30, b=60, l=60, r=40), legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"))
+            fig4.update_yaxes(title_text="Net Charm Exposure ($M per Day)")
+            fig4.update_xaxes(title_text="Strike Price", tickangle=-45, nticks=24, tickformat=".2f")
+            st.plotly_chart(fig4, use_container_width=True)
+            
             # SEKSYEN DOWNLOAD
             st.markdown("### 📥 Simpan Data Mentah")
-            csv_data = df_gex[['Strike', 'Call_OI', 'Put_OI', 'Call_Vol', 'Put_Vol', 'Net_GEX_M', 'Absolute_GEX_M', 'Net_VEX_M']].to_csv(index=False)
-            st.download_button(label="Muat Turun Fail CSV", data=csv_data, file_name=f"{ticker_symbol}_gex_vex_data.csv", mime="text/csv")
+            csv_data = df_gex[['Strike', 'Call_OI', 'Put_OI', 'Call_Vol', 'Put_Vol', 'Net_GEX_M', 'Absolute_GEX_M', 'Net_VEX_M', 'Net_CEX_M']].to_csv(index=False)
+            st.download_button(label="Muat Turun Fail CSV", data=csv_data, file_name=f"{ticker_symbol}_gex_vex_cex_data.csv", mime="text/csv")
             
         except Exception as e:
             st.error(f"Ralat susunan grafik: {e}")
