@@ -104,10 +104,10 @@ if ticker_symbol:
             
             # KPI PANEL ATAS
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Total Net GEX", f"${df_gex['Net_GEX_M'].sum():,.2f}M")
-            col2.metric("Major Gamma Wall", f"${gamma_wall_strike:,.2f}")
-            col3.metric("Total Net Vanna", f"${df_gex['Net_VEX_M'].sum():,.2f}M/1%Δ")
-            col4.metric("Total Net Charm (Bleed)", f"${df_gex['Net_CEX_M'].sum():,.2f}M/Hari")
+            col1.metric("Total Net G-Sigma", f"${df_gex['Net_GEX_M'].sum():,.2f}M")
+            col2.metric("Major ABS", f"${gamma_wall_strike:,.2f}")
+            col3.metric("Total Net V-Sigma", f"${df_gex['Net_VEX_M'].sum():,.2f}M/1%Δ")
+            col4.metric("Total Net C-Sigma", f"${df_gex['Net_CEX_M'].sum():,.2f}M/Hari")
             
             st.markdown("---")
             
