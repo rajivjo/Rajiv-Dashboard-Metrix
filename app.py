@@ -116,7 +116,7 @@ if ticker_symbol:
             # -----------------------------------------------------------------
             # 1. NET GAMMA EXPOSURE (GRAF 1)
             # -----------------------------------------------------------------
-            st.markdown("<h2 style='color: #00838F; font-family: sans-serif; font-size: 26px; font-weight: bold;'>1. Net Gamma Exposure Profile</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='color: #00838F; font-family: sans-serif; font-size: 26px; font-weight: bold;'>1. Net G-Sigma Profile</h2>", unsafe_allow_html=True)
             
             fig1 = go.Figure()
             colors_net = ['#0D47A1' if x >= 0 else '#FF9800' for x in df_gex['Net_GEX_M']]
@@ -138,7 +138,7 @@ if ticker_symbol:
                 legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"),
                 hovermode="x unified"
             )
-            fig1.update_yaxes(title_text="Net GEX (Millions)")
+            fig1.update_yaxes(title_text="Net G-Sigma (Millions)")
             fig1.update_xaxes(title_text="Strike Price", tickangle=-45, nticks=24, tickformat=".2f")
             st.plotly_chart(fig1, use_container_width=True)
             
