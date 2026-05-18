@@ -82,63 +82,78 @@ if ticker_symbol:
             today = datetime.now().date()
             t_total = 0
             
-            for expiry in selected_expiries:
-                expiry_date = datetime.strptime(expiry, "%Y-%m-%d").date()
-                t_expiry = max((expiry_date - today).days, 0.5) / 365.0
-                t_total += t_expiry
+            # Buat cubaan tarik data baru
+            data_fetch_success = True
+            try:
+                for expiry in selected_expiries:
+                    expiry_date = datetime.strptime(expiry, "%Y-%m-%d").date()
+                    t_expiry = max((expiry_date - today).days, 0.5) / 365.0
+                    t_total += t_expiry
+                    
+                    opt_chain = ticker.option_chain(expiry)
+                    
+                    c_df = opt_chain.calls[['strike', 'openInterest', 'volume', 'impliedVolatility']].copy()
+                    p_df = opt_chain.puts[['strike', 'openInterest', 'volume', 'impliedVolatility']].copy()
+                    
+                    all_calls_list.append(c_df)
+                    all_puts_list.append(p_df)
+                t = t_total / len(selected_expiries)
+            except Exception:
+                data_fetch_success = False
+
+            df_gex = pd.DataFrame()
+
+            # Process data baru jika proses tarik dari yfinance tadi berjaya
+            if data_fetch_success and all_calls_list and all_puts_list:
+                calls_combined = pd.concat(all_calls_list).groupby('strike').agg({
+                    'openInterest': 'sum',
+                    'volume': 'sum',
+                    'impliedVolatility': 'mean'
+                }).reset_index().rename(columns={'strike': 'Strike', 'volume': 'Call_Vol', 'openInterest': 'Call_OI', 'impliedVolatility': 'Call_IV'})
                 
-                opt_chain = ticker.option_chain(expiry)
+                puts_combined = pd.concat(all_puts_list).groupby('strike').agg({
+                    'openInterest': 'sum',
+                    'volume': 'sum',
+                    'impliedVolatility': 'mean'
+                }).reset_index().rename(columns={'strike': 'Strike', 'volume': 'Put_Vol', 'openInterest': 'Put_OI', 'impliedVolatility': 'Put_IV'})
                 
-                c_df = opt_chain.calls[['strike', 'openInterest', 'volume', 'impliedVolatility']].copy()
-                p_df = opt_chain.puts[['strike', 'openInterest', 'volume', 'impliedVolatility']].copy()
+                lower_bound = spot_price * (1 - (spot_range_pct / 100))
+                upper_bound = spot_price * (1 + (spot_range_pct / 100))
                 
-                all_calls_list.append(c_df)
-                all_puts_list.append(p_df)
+                strikes = sorted(list(set(calls_combined['Strike']).union(set(puts_combined['Strike']))))
+                df_gex = pd.DataFrame({'Strike': strikes})
+                df_gex = df_gex[(df_gex['Strike'] >= lower_bound) & (df_gex['Strike'] <= upper_bound)].copy()
                 
-            t = t_total / len(selected_expiries)
-            
-            # Gabungkan data mengikut Strike Price tanpa mengubah nama kolom asal yang diperlukan di bawah
-            calls_combined = pd.concat(all_calls_list).groupby('strike').agg({
-                'openInterest': 'sum',
-                'volume': 'sum',
-                'impliedVolatility': 'mean'
-            }).reset_index().rename(columns={'strike': 'Strike', 'volume': 'Call_Vol'})
-            
-            puts_combined = pd.concat(all_puts_list).groupby('strike').agg({
-                'openInterest': 'sum',
-                'volume': 'sum',
-                'impliedVolatility': 'mean'
-            }).reset_index().rename(columns={'strike': 'Strike', 'volume': 'Put_Vol'})
-            
-            calls_combined = calls_combined[calls_combined['impliedVolatility'] > 0.01]
-            puts_combined = puts_combined[puts_combined['impliedVolatility'] > 0.01]
-            
-            lower_bound = spot_price * (1 - (spot_range_pct / 100))
-            upper_bound = spot_price * (1 + (spot_range_pct / 100))
-            
-            strikes = sorted(list(set(calls_combined['Strike']).union(set(puts_combined['Strike']))))
-            df_gex = pd.DataFrame({'Strike': strikes})
-            df_gex = df_gex[(df_gex['Strike'] >= lower_bound) & (df_gex['Strike'] <= upper_bound)].copy()
-            
-            df_gex = df_gex.merge(calls_combined.rename(columns={'openInterest': 'Call_OI', 'impliedVolatility': 'Call_IV'}), on='Strike', how='left')
-            df_gex = df_gex.merge(puts_combined.rename(columns={'openInterest': 'Put_OI', 'impliedVolatility': 'Put_IV'}), on='Strike', how='left')
-            df_gex = df_gex.fillna(0)
-            
-            df_gex = df_gex[(df_gex['Call_OI'] > 0) | (df_gex['Put_OI'] > 0)].copy()
-            
-            if df_gex.empty:
-                st.warning("Tiada kecairan data opsyen aktif dalam julat harga ini. Sila luaskan julat % di sidebar.")
+                df_gex = df_gex.merge(calls_combined, on='Strike', how='left')
+                df_gex = df_gex.merge(puts_combined, on='Strike', how='left')
+                df_gex = df_gex.fillna(0)
+                df_gex = df_gex[(df_gex['Call_OI'] > 0) | (df_gex['Put_OI'] > 0) | (df_gex['Call_Vol'] > 0) | (df_gex['Put_Vol'] > 0)].copy()
+
+            # 🔵 ENGINE FREEZE DATA (SESSION STATE)
+            # Simpan data ke dalam memori kalau data baru elok dan tak kosong
+            if not df_gex.empty:
+                st.session_state['frozen_df_gex'] = df_gex.copy()
+                st.session_state['frozen_t'] = t
+                st.session_state['frozen_spot'] = spot_price
+            # Kalau data baru kosong/error, heret semula data lama keluar dari peti ais!
+            elif 'frozen_df_gex' in st.session_state:
+                df_gex = st.session_state['frozen_df_gex'].copy()
+                t = st.session_state['frozen_t']
+                spot_price = st.session_state['frozen_spot']
+                st.info("⚠️ Menggunakan data terakhir yang 'Disimpan/Freeze' (yfinance sedang mengalami kelewatan data).")
+            else:
+                st.warning("Tiada data aktif ditemui untuk setup kali pertama ini. Sila luaskan julat % atau pilih tarikh lain.")
                 st.stop()
             
-            # KEKAL NAMA ENGINE DAN PEMOLEH UBAH ASAL SEPERTI YANG ANDA RENAME
-            df_gex['Call_Gamma'] = df_gex.apply(lambda r: calculate_gamma(spot_price, r['Strike'], t, risk_free_rate, r['Call_IV'] if r['Call_IV'] > 0 else 0.1), axis=1)
-            df_gex['Put_Gamma'] = df_gex.apply(lambda r: calculate_gamma(spot_price, r['Strike'], t, risk_free_rate, r['Put_IV'] if r['Put_IV'] > 0 else 0.1), axis=1)
+            # PENGIRAAN ENGINE MATEMATIK GREEKS
+            df_gex['Call_Gamma'] = df_gex.apply(lambda r: calculate_gamma(spot_price, r['Strike'], t, risk_free_rate, r['Call_IV'] if r['Call_IV'] > 0.01 else 0.15), axis=1)
+            df_gex['Put_Gamma'] = df_gex.apply(lambda r: calculate_gamma(spot_price, r['Strike'], t, risk_free_rate, r['Put_IV'] if r['Put_IV'] > 0.01 else 0.15), axis=1)
             
-            df_gex['Call_Vanna'] = df_gex.apply(lambda r: calculate_vanna(spot_price, r['Strike'], t, risk_free_rate, r['Call_IV'] if r['Call_IV'] > 0 else 0.1, "call"), axis=1)
-            df_gex['Put_Vanna'] = df_gex.apply(lambda r: calculate_vanna(spot_price, r['Strike'], t, risk_free_rate, r['Put_IV'] if r['Put_IV'] > 0 else 0.1, "put"), axis=1)
+            df_gex['Call_Vanna'] = df_gex.apply(lambda r: calculate_vanna(spot_price, r['Strike'], t, risk_free_rate, r['Call_IV'] if r['Call_IV'] > 0.01 else 0.15, "call"), axis=1)
+            df_gex['Put_Vanna'] = df_gex.apply(lambda r: calculate_vanna(spot_price, r['Strike'], t, risk_free_rate, r['Put_IV'] if r['Put_IV'] > 0.01 else 0.15, "put"), axis=1)
             
-            df_gex['Call_Charm'] = df_gex.apply(lambda r: calculate_charm(spot_price, r['Strike'], t, risk_free_rate, r['Call_IV'] if r['Call_IV'] > 0 else 0.1, "call"), axis=1)
-            df_gex['Put_Charm'] = df_gex.apply(lambda r: calculate_charm(spot_price, r['Strike'], t, risk_free_rate, r['Put_IV'] if r['Put_IV'] > 0 else 0.1, "put"), axis=1)
+            df_gex['Call_Charm'] = df_gex.apply(lambda r: calculate_charm(spot_price, r['Strike'], t, risk_free_rate, r['Call_IV'] if r['Call_IV'] > 0.01 else 0.15, "call"), axis=1)
+            df_gex['Put_Charm'] = df_gex.apply(lambda r: calculate_charm(spot_price, r['Strike'], t, risk_free_rate, r['Put_IV'] if r['Put_IV'] > 0.01 else 0.15, "put"), axis=1)
             
             # RAW EXPOSURE CALCULATIONS
             df_gex['Call_GEX_Raw'] = df_gex['Call_Gamma'] * df_gex['Call_OI'] * (spot_price ** 2) * 0.01
