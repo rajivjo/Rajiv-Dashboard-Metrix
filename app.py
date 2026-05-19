@@ -41,7 +41,7 @@ def get_expiry_tag(date_str):
 st.sidebar.header("Tetapan Parameter")
 ticker_symbol = st.sidebar.text_input("Simbol Saham / ETF (US):", value="GLD").upper().strip()
 risk_free_rate = st.sidebar.number_input("Risk-Free Rate (r):", value=0.04, step=0.01)
-spot_range_pct = st.sidebar.slider("Julat Strike dari Harga Spot (%):", min_value=5, max_value=30, value=7)
+spot_range_pct = st.sidebar.slider("Julat Strike dari Harga Spot (%):", min_value=5, max_value=30, value=5)
 
 if ticker_symbol:
     with st.spinner(f"Memproses data bagi {ticker_symbol}..."):
@@ -94,6 +94,20 @@ if ticker_symbol:
                     
                     c_df = opt_chain.calls[['strike', 'openInterest', 'volume', 'impliedVolatility']].copy()
                     p_df = opt_chain.puts[['strike', 'openInterest', 'volume', 'impliedVolatility']].copy()
+                    
+                    # 🛡️ ─── BAJU HUJAN SUNTIKAN PEMBERSIHAN DATA YFINANCE (ANTI-CRASH) ───
+                    if not c_df.empty:
+                        c_df['impliedVolatility'] = c_df['impliedVolatility'].fillna(0.15)
+                        c_df.loc[c_df['impliedVolatility'] <= 0.01, 'impliedVolatility'] = 0.15
+                        c_df['openInterest'] = c_df['openInterest'].fillna(0)
+                        c_df['volume'] = c_df['volume'].fillna(0)
+
+                    if not p_df.empty:
+                        p_df['impliedVolatility'] = p_df['impliedVolatility'].fillna(0.15)
+                        p_df.loc[p_df['impliedVolatility'] <= 0.01, 'impliedVolatility'] = 0.15
+                        p_df['openInterest'] = p_df['openInterest'].fillna(0)
+                        p_df['volume'] = p_df['volume'].fillna(0)
+                    # ──────────────────────────────────────────────────────────────────
                     
                     all_calls_list.append(c_df)
                     all_puts_list.append(p_df)
@@ -160,6 +174,7 @@ if ticker_symbol:
             df_gex['Put_GEX_Raw'] = df_gex['Put_Gamma'] * df_gex['Put_OI'] * (spot_price ** 2) * 0.01 * (-1)
             df_gex['Net_GEX_Raw'] = df_gex['Call_GEX_Raw'] + df_gex['Put_GEX_Raw']
             
+            # Formula Vanna Semalam yang Padu!
             df_gex['Call_VEX_Raw'] = df_gex['Call_Vanna'] * df_gex['Call_OI'] * spot_price * 0.01
             df_gex['Put_VEX_Raw'] = df_gex['Put_Vanna'] * df_gex['Put_OI'] * spot_price * 0.01
             df_gex['Net_VEX_Raw'] = df_gex['Call_VEX_Raw'] + df_gex['Put_VEX_Raw']
