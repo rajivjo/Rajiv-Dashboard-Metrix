@@ -41,7 +41,7 @@ def get_expiry_tag(date_str):
 st.sidebar.header("Tetapan Parameter")
 ticker_symbol = st.sidebar.text_input("Simbol Saham / ETF (US):", value="GLD").upper().strip()
 risk_free_rate = st.sidebar.number_input("Risk-Free Rate (r):", value=0.04, step=0.01)
-spot_range_pct = st.sidebar.slider("Julat Strike dari Harga Spot (%):", min_value=5, max_value=30, value=5)
+spot_range_pct = st.sidebar.slider("Julat Strike dari Harga Spot (%):", min_value=5, max_value=30, value=7)
 
 if ticker_symbol:
     with st.spinner(f"Memproses data bagi {ticker_symbol}..."):
