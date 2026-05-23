@@ -3,7 +3,10 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import requests
+import yfinance as yf
 from datetime import datetime, timedelta
+# Pastikan folder 'utils' ada fail 'math_engine.py'
+from utils.math_engine import calculate_gamma 
 
 # --- 1. FUNGSI PENGAMBILAN DATA ---
 def get_options_data(ticker_symbol):
@@ -17,7 +20,6 @@ def get_options_data(ticker_symbol):
     except Exception as e:
         return {"error": str(e)}
 
-# --- 2. FUNGSI EXPIRY TAG (DENGAN STRUKTUR TRY-EXCEPT YANG LENGKAP) ---
 def get_expiry_tag(date_str):
     try:
         dt = datetime.strptime(date_str, "%Y-%m-%d")
@@ -25,40 +27,45 @@ def get_expiry_tag(date_str):
         first_day = datetime(year, month, 1)
         first_friday = first_day + timedelta(days=(4 - first_day.weekday() + 7) % 7)
         third_friday = first_friday + timedelta(weeks=2)
-        
-        if month == 6 and third_friday.day == 19:
-            monthly_expiry_day = 18
-        else:
-            monthly_expiry_day = third_friday.day
-            
-        if dt.day == monthly_expiry_day:
-            return f"{date_str} (m)"
-        else:
-            return f"{date_str} (w)"
+        monthly_expiry_day = 18 if (month == 6 and third_friday.day == 19) else third_friday.day
+        return f"{date_str} (m)" if dt.day == monthly_expiry_day else f"{date_str} (w)"
     except Exception:
         return date_str
 
-# --- 3. KONFIGURASI & SIDEBAR ---
+# --- 2. KONFIGURASI & SIDEBAR ---
 st.set_page_config(page_title="Rajiv Exposure Matrix", layout="wide")
 st.title("📊 Rajiv Exposure Matrix")
 
 ticker_symbol = st.sidebar.text_input("Simbol Saham / ETF (US):", value="GLD").upper().strip()
 
 if ticker_symbol:
-    with st.spinner(f"Menyambung ke VPS untuk data {ticker_symbol}..."):
+    with st.spinner(f"Menyambung ke VPS..."):
         data = get_options_data(ticker_symbol)
         
         if data and 'error' not in data:
             spot_price = data.get('spot_price', 0)
             expirations = data.get('expirations', [])
-            
-            st.sidebar.metric(label=f"Harga Semasa", value=f"${spot_price:,.2f}")
+            st.sidebar.metric(label="Harga Semasa", value=f"${spot_price:,.2f}")
             
             expiry_mapping = {get_expiry_tag(d): d for d in expirations}
-            selected_display = st.sidebar.multiselect("Pilih Tarikh:", options=list(expiry_mapping.keys()), default=[list(expiry_mapping.keys())[0]])
+            selected_display = st.sidebar.multiselect("Pilih Tarikh:", options=list(expiry_mapping.keys()))
             
             if selected_display:
                 st.success("Data berjaya ditarik dari VPS!")
-                st.write("Sistem API anda kini berfungsi dengan stabil.")
+                
+                # --- 3. PENGIRAAN & GRAF ---
+                ticker = yf.Ticker(ticker_symbol)
+                for display_name in selected_display:
+                    expiry = expiry_mapping[display_name]
+                    opt = ticker.option_chain(expiry)
+                    
+                    # Kira Greeks
+                    gex_df = calculate_gamma(opt.calls, opt.puts, spot_price)
+                    
+                    # Papar Graf
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(x=gex_df['strike'], y=gex_df['gex'], name="Gamma Exposure"))
+                    fig.update_layout(title=f"Gamma Exposure: {ticker_symbol} - {expiry}")
+                    st.plotly_chart(fig, use_container_width=True)
         else:
             st.error(f"Gagal mendapatkan data: {data.get('error', 'Unknown Error')}")
