@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import requests
 import yfinance as yf
 from datetime import datetime, timedelta
-# Pastikan folder 'utils' ada fail 'math_engine.py'
+# Import fungsi pengiraan dari folder utils
 from utils.math_engine import calculate_gamma 
 
 # --- 1. FUNGSI PENGAMBILAN DATA ---
@@ -43,7 +43,7 @@ if ticker_symbol:
         data = get_options_data(ticker_symbol)
         
         if data and 'error' not in data:
-            spot_price = data.get('spot_price', 0)
+            spot_price = float(data.get('spot_price', 0))
             expirations = data.get('expirations', [])
             st.sidebar.metric(label="Harga Semasa", value=f"${spot_price:,.2f}")
             
@@ -55,16 +55,26 @@ if ticker_symbol:
                 
                 # --- 3. PENGIRAAN & GRAF ---
                 ticker = yf.Ticker(ticker_symbol)
+                r = 0.01 # Kadar faedah 1%
+                
                 for display_name in selected_display:
                     expiry = expiry_mapping[display_name]
                     opt = ticker.option_chain(expiry)
                     
-                    # Kira Greeks
-                    gex_df = calculate_gamma(opt.calls, opt.puts, spot_price)
+                    # Kira t (time to maturity dalam tahun)
+                    t_days = (datetime.strptime(expiry, "%Y-%m-%d") - datetime.now()).days
+                    t = max(t_days / 365.0, 0.001) # Elak pembahagian dengan sifar
+                    
+                    # Bersihkan data: Isi nilai kosong IV dengan 0.2 (20%)
+                    df = opt.calls.copy()
+                    df['impliedVolatility'] = df['impliedVolatility'].fillna(0.2)
+                    
+                    # Kira Gamma bagi setiap baris (strike)
+                    df['gamma'] = df.apply(lambda x: calculate_gamma(spot_price, x['strike'], t, r, x['impliedVolatility']), axis=1)
                     
                     # Papar Graf
                     fig = go.Figure()
-                    fig.add_trace(go.Bar(x=gex_df['strike'], y=gex_df['gex'], name="Gamma Exposure"))
+                    fig.add_trace(go.Bar(x=df['strike'], y=df['gamma'], name="Gamma Exposure"))
                     fig.update_layout(title=f"Gamma Exposure: {ticker_symbol} - {expiry}")
                     st.plotly_chart(fig, use_container_width=True)
         else:
