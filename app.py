@@ -80,5 +80,38 @@ if ticker_symbol:
             # [SAMBUNGAN LOGIK KOD ASAL ANDA DI SINI...]
             # (Pastikan anda simpan logic pengiraan Greeks anda di bawah bahagian ini)
             st.success("Data berjaya ditarik dari VPS!")
+            # --- SAMBUNGAN LOGIK PENGIRAAN GREEKS ---
+            ticker = yf.Ticker(ticker_symbol)
+            all_calls_list = []
+            all_puts_list = []
+            today = datetime.now().date()
+            t_total = 0
+            
+            for expiry in selected_expiries:
+                expiry_date = datetime.strptime(expiry, "%Y-%m-%d").date()
+                t_expiry = max((expiry_date - today).days, 0.5) / 365.0
+                t_total += t_expiry
+                
+                opt_chain = ticker.option_chain(expiry)
+                c_df = opt_chain.calls[['strike', 'openInterest', 'volume', 'impliedVolatility']].copy()
+                p_df = opt_chain.puts[['strike', 'openInterest', 'volume', 'impliedVolatility']].copy()
+                
+                # Pembersihan data asas
+                for df in [c_df, p_df]:
+                    df['impliedVolatility'] = df['impliedVolatility'].fillna(0.15)
+                    df.loc[df['impliedVolatility'] <= 0.01, 'impliedVolatility'] = 0.15
+                    df['openInterest'] = df['openInterest'].fillna(0)
+                    df['volume'] = df['volume'].fillna(0)
+                
+                all_calls_list.append(c_df)
+                all_puts_list.append(p_df)
+            
+            t = t_total / len(selected_expiries)
+            
+            # Gabung dan Kira Greeks (seperti kod asal anda)
+            calls_combined = pd.concat(all_calls_list).groupby('strike').agg({'openInterest': 'sum', 'volume': 'sum', 'impliedVolatility': 'mean'}).reset_index()
+            puts_combined = pd.concat(all_puts_list).groupby('strike').agg({'openInterest': 'sum', 'volume': 'sum', 'impliedVolatility': 'mean'}).reset_index()
+            
+            # ... (Teruskan dengan kod pengiraan GEX/VEX/CEX anda di sini) ...
         else:
             st.error("Data tidak ditemui atau VPS tidak dapat diakses.")
