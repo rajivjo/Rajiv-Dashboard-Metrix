@@ -8,9 +8,12 @@ from datetime import datetime, timedelta
 from utils.math_engine import calculate_gamma, calculate_vanna, calculate_charm, find_gamma_flip
 
 # --- FUNGSI PENGAMBILAN DATA DARI VPS ---
-def get_options_data(ticker_symbol):
-    # Tukar IP ini kepada IP VPS anda (168.144.134.211)
-    url = f"http://168.144.134.211:8000/get_data/{ticker_symbol}"
+def get_chain_from_vps(ticker, expiry):
+    url = f"http://168.144.134.211:8000/get_options_chain/{ticker}/{expiry}"
+    response = requests.get(url)
+    data = response.json()
+    # Tukar balik kepada DataFrame
+    return pd.DataFrame(data['calls']), pd.DataFrame(data['puts'])
     try:
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
