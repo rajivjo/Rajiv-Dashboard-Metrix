@@ -1,5 +1,3 @@
-import sys
-import os
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -9,28 +7,33 @@ import yfinance as yf
 from datetime import datetime
 from scipy.stats import norm
 
-# Pastikan folder 'utils' dijumpai oleh Streamlit
+# Pastikan folder 'utils' dijumpai (Struktur folder dikekalkan)
+import sys
+import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from utils.math_engine import calculate_gamma
 
-# 1. CACHE DATA YANG RINGAN SAHAJA (JANGAN CACHE OBJEK YFINANCE)
+# 1. CACHE DATA YANG RINGAN (SIMPAN DATAFRAME, BUKAN OBJEK YFINANCE)
 @st.cache_data(ttl=3600)
 def get_clean_option_data(ticker_symbol, expiry):
     ticker = yf.Ticker(ticker_symbol)
     opt = ticker.option_chain(expiry)
-    # Simpan hanya dataframe. Streamlit sangat suka DataFrame!
+    # Simpan hanya dataframe yang diperlukan
     return opt.calls, opt.puts
 
-# 2. FUNGSI AMBIL DATA VPS
+# 2. FUNGSI AMBIL DATA VPS DENGAN ERROR HANDLING
 def get_options_data(ticker_symbol):
     url = f"http://168.144.134.211:8000/get_data/{ticker_symbol}"
     try:
         response = requests.get(url, timeout=10)
-        return response.json() if response.status_code == 200 else {"error": f"API {response.status_code}"}
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {"error": f"API Error {response.status_code}"}
     except Exception as e:
         return {"error": str(e)}
 
-# 3. UI DASHBOARD
+# 3. UI UTAMA
 st.set_page_config(page_title="Rajiv Exposure Matrix", layout="wide")
 st.title("📊 Rajiv Exposure Matrix")
 
@@ -47,7 +50,7 @@ if ticker_symbol:
         selected_expiry = st.sidebar.selectbox("Pilih Tarikh:", options=expirations)
         
         if selected_expiry:
-            # Guna fungsi cache yang betul
+            # Guna cache yang stabil
             calls_df, _ = get_clean_option_data(ticker_symbol, selected_expiry)
             
             t_days = (datetime.strptime(selected_expiry, "%Y-%m-%d") - datetime.now()).days
@@ -63,4 +66,4 @@ if ticker_symbol:
             fig.update_layout(title="Gamma Exposure", xaxis_title="Strike", yaxis_title="Gamma")
             st.plotly_chart(fig, use_container_width=True)
     else:
-        st.error(f"Ralat: {data.get('error', 'Gagal hubungi VPS')}")
+        st.error(f"Ralat VPS: {data.get('error')}")
